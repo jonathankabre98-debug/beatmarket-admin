@@ -1,0 +1,41 @@
+# Vercel Build Log
+
+Ce fichier documente les étapes de build pour Vercel.
+
+## Configuration
+
+- Framework: Static HTML
+- Build Command: `npm run build` (no-op)
+- Start Command: `npm run start`
+- Install Command: `npm install`
+
+## Fichiers clés
+
+1. **public/index.html** - Fichier principal de l'app
+   - Contient React 18, React-DOM, et Babel
+   - Inclut tout le code de l'app BeatMarket Admin
+   - Optimisé pour Vercel
+
+2. **vercel.json** - Configuration Vercel
+   - Configure les headers de sécurité
+   - Configure les rewrites pour SPA
+   - Optimise le cache
+
+3. **package.json** - Dépendances minimales
+   - Aucune dépendance externe
+   - Node 18.x requis
+
+## Optimisations appliquées
+
+✅ Headers de sécurité (X-Frame-Options, X-Content-Type-Options)
+✅ Cache-Control pour les assets statiques
+✅ Rewrites pour Single Page Application
+✅ Compression automatique Vercel
+✅ CDN global Vercel
+
+## Après le déploiement
+
+1. Teste l'app sur l'URL Vercel fournie
+2. Configure ton domaine personnalisé (optionnel)
+3. Active les Web Analytics (optionnel)
+4. Configure les Environment Variables si besoin
