@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+  <meta name="description" content="BeatMarket Admin Panel - Panneau administrateur pour BeatMarket"/>
+  <meta name="theme-color" content="#0A0015"/>
+  <meta property="og:title" content="BeatMarket Admin"/>
+  <meta property="og:description" content="Panneau administrateur pour BeatMarket"/>
+  <meta property="og:type" content="website"/>
+  <title>AdminBeatMarket</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#0A0015;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden}
+    #root{width:100vw;height:100vh}
+    #loading{position:fixed;inset:0;background:#0A0015;display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:16px}
+    #loading p{color:rgba(255,255,255,0.6);font-size:14px}
+    .spinner{width:40px;height:40px;border:3px solid rgba(155,89,255,0.2);border-top-color:#9B59FF;border-radius:50%;animation:spin 0.8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+  <div id="loading"><div class="spinner"></div><p>Chargement AdminBeatMarket...</p></div>
+  <div id="root"></div>
+  
+  <!-- React Scripts from CDN -->
+  <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
+  
+  <!-- Main App Script -->
+  <script type="text/babel" data-presets="react">
+const {useState,useEffect,useCallback,useMemo,useRef}=React;
+
+
+// ─── SUPABASE ──────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://zwftcovxxirzzqdmkymc.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_NTyCZ4iyHpO7kzvZRVGa6A_YEjsXPhU";
+
+async function sbRequest(path, options = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": "return=representation",
+      ...(options.headers || {}),
+    },
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Supabase error (${res.status}): ${errText}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+const sbSelect = (table, query = "") => sbRequest(`${table}?select=*${query}`);
+const sbInsert = (table, row) => sbRequest(table, { method: "POST", body: JSON.stringify(row) });
+const sbDelete = (table, id) => sbRequest(`${table}?id=eq.${id}`, { method: "DELETE" });
+const sbUpdate = (table, id, patch) => sbRequest(`${table}?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+
+const trackFromDb = r => ({
+  id: r.id, title: r.title, genre: r.genre, cover: r.cover,
+  audioUrl: r.audio_url, audioName: r.audio_name, duration: r.duration,
+  producer: r.producer, plays: r.plays, downloads: r.downloads,
+  favorites: r.favorites, shares: r.shares, avgListenSec: r.avg_listen_sec,
+  active: r.active, exclusive: r.exclusive, uploadedAt: r.uploaded_at,
+  topCountry: null,
+});
+
+const trackToDb = t => ({
+  title: t.title, genre: t.genre, cover: t.cover, audio_url: t.audioUrl,
+  audio_name: t.audioName, duration: t.duration, producer: t.producer,
+  plays: 0, downloads: 0, favorites: 0, shares: 0, avg_listen_sec: 0,
+  active: true, exclusive: false,
+});
+
+// ─── CONSTANTES ─────────────────────────────────────────────────────────
+const SUPER_ADMINS = ["kabrejonathan21@gmail.com", "jonathankabre98@gmail.com"];
+const ACCENT = "#9B59FF";
+const GENRES = ["Drill","Hip-Hop","Trap","Afrobeat","Piano","Love","Sad","Gospel","Amapiano","Lo-Fi","Dancehall"];
+const GENRE_ICON = {Drill:"⚡","Hip-Hop":"🎤",Trap:"🔥",Afrobeat:"🌍",Piano:"🎹",Love:"❤️",Sad:"💧",Gospel:"✨",Amapiano:"🎺","Lo-Fi":"🌙",Dancehall:"🇯🇲"};
+const COUNTRIES = [
+  {code:"FR",name:"France",flag:"🇫🇷"},{code:"BE",name:"Belgique",flag:"🇧🇪"},{code:"CH",name:"Suisse",flag:"🇨🇭"},
+  {code:"CA",name:"Canada",flag:"🇨🇦"},{code:"US",name:"États-Unis",flag:"🇺🇸"},{code:"GB",name:"Royaume-Uni",flag:"🇬🇧"},
+  {code:"CI",name:"Côte d'Ivoire",flag:"🇨🇮"},{code:"SN",name:"Sénégal",flag:"🇸🇳"},{code:"CM",name:"Cameroun",flag:"🇨🇲"},
+  {code:"CD",name:"RD Congo",flag:"🇨🇩"},{code:"NG",name:"Nigéria",flag:"🇳🇬"},{code:"GH",name:"Ghana",flag:"🇬🇭"},
+  {code:"MA",name:"Maroc",flag:"🇲🇦"},{code:"DZ",name:"Algérie",flag:"🇩🇿"},{code:"TN",name:"Tunisie",flag:"🇹🇳"},
+  {code:"BR",name:"Brésil",flag:"🇧🇷"},{code:"ZA",name:"Afrique du Sud",flag:"🇿🇦"},{code:"IN",name:"Inde",flag:"🇮🇳"},
+  {code:"JP",name:"Japon",flag:"🇯🇵"},{code:"DE",name:"Allemagne",flag:"🇩🇪"},
+];
+
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+const fmtN = n => n>=1e6?`${(n/1e6).toFixed(1)}M`:n>=1e3?`${(n/1e3).toFixed(1)}K`:String(n||0);
+const fmtMoney = n => `${Number(n).toLocaleString("fr-FR",{maximumFractionDigits:0})} €`;
+const nowISO = () => new Date().toISOString();
+const fmtDate = iso => iso?new Date(iso).toLocaleDateString("fr-FR",{day:"2-digit",month:"short",year:"numeric"}):"-";
+const fmtDT = iso => iso?new Date(iso).toLocaleString("fr-FR",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"-";
+const daysAgo = d => new Date(Date.now()-d*864e5);
+
+// ─── STORAGE ──────────────────────────────────────────────────────────
+async function sGet(key,shared=true){try{const r=await (()=>{})();return r?.value?JSON.parse(r.value):null;}catch{return null;}}
+async function sSet(key,val,shared=true){try{await (()=>{})()
+,shared);return true;}catch{return false;}}
+async function sDel(key,shared=false){try{await (()=>{})();}catch{}}
+
+// ─── ÉTAT INITIAL VIDE ──────────────────────────────────────────────────────
+const EMPTY_STATE = {
+  users: [],
+  tracks: [],
+  admins: [],
+  events: [{id:uid(), text:"🚀 Serveur BeatMarket initialisé.", icon:"🚀", at:nowISO()}],
+};
+
+// ─── STYLES ──────────────────────────────────────────────────────────
+const G = {
+  bg:"#06030F",card:"rgba(255,255,255,0.04)",border:"rgba(255,255,255,0.08)",
+  text:"rgba(255,255,255,0.85)",muted:"rgba(255,255,255,0.35)",dim:"rgba(255,255,255,0.15)",
+};
+const inpStyle={width:"100%",padding:"11px 14px",borderRadius:13,border:`1px solid ${G.border}`,background:"rgba(255,255,255,0.05)",color:"white",fontSize:13,outline:"none",boxSizing:"border-box"};
+
+const css=`
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+button,input,select,textarea{font-family:inherit;}
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:4px;}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes blink{0%,100%{background:rgba(0,212,140,0.8)}50%{background:rgba(0,212,140,0.2)}}
+`;
+
+// ─── PRIMITIVES ─────────────────────────────────────────────────────────
+const Card=({children,style,onClick})=>(
+  <div onClick={onClick} style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:16,padding:14,...style,cursor:onClick?"pointer":undefined}}>
+    {children}
+  </div>
+);
+const Pill=({children,color="#9B59FF"})=>(
+  <span style={{display:"inline-flex",alignItems:"center",gap:3,padding:"2px 8px",borderRadius:10,fontSize:10,fontWeight:800,color,background:`${color}20`,border:`1px solid ${color}40`}}>{children}</span>
+);
+const SectionHead=({title,sub,right})=>(
+  <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",margin:"20px 0 10px"}}>
+    <div><div style={{color:"white",fontSize:14,fontWeight:800}}>{title}</div>{sub&&<div style={{color:G.muted,fontSize:11,marginTop:2}}>{sub}</div>}</div>
+    {right}
+  </div>
+);
+const Empty=({text,sub})=>(
+  <div style={{textAlign:"center",padding:"36px 20px"}}>
+    <div style={{fontSize:32,marginBottom:10}}>📭</div>
+    <div style={{color:"white",fontSize:13.5,fontWeight:700,marginBottom:6}}>{text}</div>
+    {sub&&<div style={{color:G.muted,fontSize:12,lineHeight:1.6}}>{sub}</div>}
+  </div>
+);
+const Bar=({pct,color=ACCENT})=>(
+  <div style={{height:5,background:"rgba(255,255,255,0.07)",borderRadius:4,overflow:"hidden"}}>
+    <div style={{height:"100%",width:`${Math.min(100,Math.max(0,pct))}%`,background:`linear-gradient(90deg,${color},${color}99)`,borderRadius:4,transition:"width 0.6s ease"}}/>
+  </div>
+);
+const Divider=()=><div style={{borderBottom:`1px solid ${G.border}`}}/>
+
+function StatCard({icon,label,value,sub,accent=ACCENT,live}){
+  return(
+    <Card style={{display:"flex",flexDirection:"column",gap:6,minHeight:90}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontSize:17}}>{icon}</span>
+        {live&&<span style={{width:7,height:7,borderRadius:"50%",animation:"blink 1.5s infinite",background:"rgba(0,212,140,0.8)"}}/>
+      </div>
+      <div style={{color:"white",fontSize:22,fontWeight:900,letterSpacing:-0.5,lineHeight:1}}>{value}</div>
+      <div style={{color:G.muted,fontSize:10.5,fontWeight:600}}>{label}</div>
+      {sub&&<div style={{color:accent,fontSize:10,fontWeight:700}}>{sub}</div>}
+    </Card>
+  );
+}
+
+function Toast({msg,kind}){
+  const c={info:ACCENT,success:"#00D48C",error:"#FF3B5C",warn:"#FFB800"}[kind]||ACCENT;
+  return(
+    <div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",zIndex:9999,background:"rgba(8,5,18,0.97)",border:`1px solid ${c}55`,borderRadius:14,padding:"10px 18px",color:"white",fontSize:12.5,fontWeight:700,animation:"slideDown 0.3s ease",boxShadow:`0 8px 32px rgba(0,0,0,0.3)`,backdropFilter:"blur(10px)",maxWidth:340}}>
+      {msg}
+    </div>
+  );
+}
+
+function Modal({onClose,children,maxW=440}){
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",backdropFilter:"blur(10px)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"#0C0818",border:`1px solid ${G.border}`,borderRadius:20,padding:20,width:"100%",maxWidth:maxW,maxHeight:"88vh",overflowY:"auto",animation:"fadeUp 0.3s ease"}}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── LOGIN ──────────────────────────────────────────────────────────
+function Login({onLogin,admins}){
+  const [email,setEmail]=useState("");
+  const [err,setErr]=useState("");
+  const all=useMemo(()=>[...SUPER_ADMINS,...admins.map(a=>a.email)],[admins]);
+  const go=()=>{
+    const e=email.trim().toLowerCase();
+    if(!e){setErr("Entre ton email.");return;}
+    if(!all.includes(e)){setErr("Accès refusé. Cet email n'est pas administrateur.");return;}
+    onLogin({email:e,role:SUPER_ADMINS.includes(e)?"super":"admin"});
+  };
+  return(
+    <div style={{width:"100%",height:"100dvh",background:`radial-gradient(ellipse at 50% 0%,rgba(155,89,255,0.22),transparent 65%),${G.bg}`,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <style>{css}</style>
+      <div style={{width:"100%",maxWidth:360,animation:"fadeUp 0.3s ease"}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{width:68,height:68,borderRadius:20,background:`linear-gradient(135deg,${ACCENT},#5533CC)`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",boxShadow:`0 0 30px ${ACCENT}44`}}>
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <h1 style={{color:"white",fontSize:22,fontWeight:900,margin:"0 0 6px"}}>Serveur Central</h1>
+          <p style={{color:G.muted,fontSize:12.5,margin:0}}>BeatMarket · Panneau Administrateur</p>
+        </div>
+        <label style={{color:G.muted,fontSize:10.5,fontWeight:700,letterSpacing:1,textTransform:"uppercase",display:"block",marginBottom:7}}>Email administrateur</label>
+        <input value={email} onChange={e=>{setEmail(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="ton.email@gmail.com" style={{...inpStyle,marginBottom:err?8:14,transition:"all 0.2s ease"}}/>
+        {err&&<p style={{color:"#FF6B85",fontSize:12,margin:"0 0 12px"}}>{err}</p>}
+        <button onClick={go} style={{width:"100%",padding:14,borderRadius:16,background:`linear-gradient(90deg,${ACCENT},#7B3FE0)`,border:"none",color:"white",fontWeight:800,fontSize:14,cursor:"pointer",transition:"all 0.2s ease",boxShadow:`0 8px 24px ${ACCENT}44`}}>
+          Accéder au serveur →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── DASHBOARD ─────────────────────────────────────────────────────────
+function Dashboard({state}){
+  const {users,tracks,events}=state;
+  const now=Date.now();
+  const todayStart=new Date();todayStart.setHours(0,0,0,0);
+  const active=(d)=>users.filter(u=>new Date(u.lastActive)>=daysAgo(d)).length;
+  const newToday=users.filter(u=>new Date(u.createdAt)>=todayStart).length;
+  const onlineNow=users.filter(u=>now-new Date(u.lastActive).getTime()<10*60*1000).length;
+  const totalPlays=users.reduce((a,u)=>a+u.plays,0)+tracks.reduce((a,t)=>a+t.plays,0);
+  const totalDL=users.reduce((a,u)=>a+u.downloads,0)+tracks.reduce((a,t)=>a+t.downloads,0);
+  const totalAds=users.reduce((a,u)=>a+u.adsWatched,0);
+  const tokEarned=users.reduce((a,u)=>a+u.tokensEarned,0);
+  const tokSpent=users.reduce((a,u)=>a+u.tokensSpent,0);
+  const premium=users.filter(u=>u.premium);
+  const premiumToday=premium.filter(u=>u.premiumSince&&new Date(u.premiumSince)>=todayStart).length;
+  const premiumWeek=premium.filter(u=>u.premiumSince&&new Date(u.premiumSince)>=daysAgo(7)).length;
+  const conversion=users.length?((premium.length/users.length)*100).toFixed(1):"0.0";
+  const revenue=premium.length*9.99;
+  const adRevenue=totalAds*0.004;
+
+  if(users.length===0&&tracks.length===0){
+    return(
+      <div style={{paddingBottom:32}}>
+        <SectionHead title="Tableau de bord"/>
+        <Card style={{textAlign:"center",padding:"40px 24px",marginBottom:12}}>
+          <div style={{fontSize:48,marginBottom:14}}>🚀</div>
+          <div style={{color:"white",fontSize:16,fontWeight:900,marginBottom:8}}>Serveur prêt</div>
+          <div style={{color:G.muted,fontSize:13,lineHeight:1.8}}>
+            Aucun utilisateur ni son pour l'instant.<br/>
+            Les données s'afficheront ici dès que BeatMarket sera connecté à ce serveur.
+          </div>
+        </Card>
+        <Card style={{background:`${ACCENT}0D`,border:`1px solid ${ACCENT}30`}}>
+          <div style={{color:"white",fontSize:12.5,fontWeight:800,marginBottom:6}}>🔌 Prochaine étape</div>
+          <div style={{color:G.muted,fontSize:12,lineHeight:1.7}}>Connecte ton app BeatMarket à Supabase ou Firebase, puis lie cette interface à la même base de données.</div>
+        </Card>
+      </div>
+    );
+  }
+
+  return(
+    <div style={{paddingBottom:32}}>
+      <SectionHead title="Tableau de bord" sub="Données en temps réel"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+        <StatCard icon="👥" label="Utilisateurs totaux" value={fmtN(users.length)} live/>
+        <StatCard icon="🟢" label="En ligne maintenant" value={fmtN(onlineNow)} accent="#00D48C" live/>
+        <StatCard icon="📅" label="Actifs aujourd'hui" value={fmtN(active(1))}/>
+        <StatCard icon="📆" label="Actifs cette semaine" value={fmtN(active(7))}/>
+        <StatCard icon="🗓️" label="Actifs ce mois" value={fmtN(active(30))}/>
+        <StatCard icon="✨" label="Nouveaux aujourd'hui" value={fmtN(newToday)} accent="#FFB800"/>
+        <StatCard icon="🎧" label="Écoutes totales" value={fmtN(totalPlays)}/>
+        <StatCard icon="⬇️" label="Téléchargements" value={fmtN(totalDL)}/>
+        <StatCard icon="📺" label="Pubs regardées" value={fmtN(totalAds)} accent="#FF8C42"/>
+        <StatCard icon="🪙" label="Jetons gagnés" value={fmtN(tokEarned)} accent="#FFD700"/>
+        <StatCard icon="💸" label="Jetons utilisés" value={fmtN(tokSpent)} accent="#FFD700"/>
+        <StatCard icon="🎵" label="Sons en bibliothèque" value={fmtN(tracks.length)}/>
+      </div>
+      <SectionHead title="Premium & Revenus"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+        <StatCard icon="👑" label="Abonnés Premium" value={fmtN(premium.length)} accent="#FFD700"/>
+        <StatCard icon="🆕" label="Nouveaux Premium (jour)" value={fmtN(premiumToday)} accent="#FFD700"/>
+        <StatCard icon="📈" label="Nouveaux Premium (sem.)" value={fmtN(premiumWeek)} accent="#FFD700"/>
+        <StatCard icon="🔄" label="Taux de conversion" value={`${conversion}%`} accent="#FFD700"/>
+        <StatCard icon="💰" label="Revenus Premium estimés" value={fmtMoney(revenue)} accent="#00D48C" sub="9,99 € / abonné"/>
+        <StatCard icon="📺" label="Revenus Pub estimés" value={fmtMoney(adRevenue)} accent="#FF8C42" sub="CPM illustratif"/>
+      </div>
+      <SectionHead title="Activité récente"/>
+      <Card style={{padding:0,overflow:"hidden"}}>
+        {events.length===0?<Empty text="Aucune activité.":events.slice(0,10).map((ev,i)=>(
+          <div key={ev.id}>
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px"}}>
+              <span style={{fontSize:16}}>{ev.icon||"🔔"}</span>
+              <span style={{color:G.text,fontSize:12.5,flex:1,lineHeight:1.4}}>{ev.text}</span>
+              <span style={{color:G.dim,fontSize:10,whiteSpace:"nowrap"}}>{fmtDT(ev.at)}</span>
+            </div>
+            {i<Math.min(events.length,10)-1&&<Divider/>}
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
+// ─── ROOT ─────────────────────────────────────────────────────────
+function App(){
+  const [booting,setBooting]=useState(true);
+  const [session,setSession]=useState(null);
+  const [state,setState]=useState(EMPTY_STATE);
+  const [tab,setTab]=useState("dashboard");
+  const [toastData,setToastData]=useState(null);
+  const saveRef=useRef(false);
+
+  const showToast=useCallback((msg,kind="info")=>{
+    setToastData({msg,kind});
+    setTimeout(()=>setToastData(null),3200);
+  },[]);
+
+  const addEvent=useCallback((text,icon="🔔")=>{
+    setState(s=>({...s,events:[{id:uid(),text,icon,at:nowISO()},...s.events].slice(0,80)}));
+  },[]);
+
+  useEffect(()=>{
+    (async()=>{
+      const saved=await sGet("bm_prod_v1",true);
+      if(saved) setState(saved);
+      const sess=await sGet("bm_session_prod_v1",false);
+      if(sess) setSession(sess);
+      try{
+        const dbTracks=await sbSelect("tracks","&order=uploaded_at.desc");
+        if(dbTracks) setState(s=>({...s,tracks:dbTracks.map(trackFromDb)}));
+      }catch(e){
+        console.error("Erreur chargement tracks Supabase:",e.message);
+      }
+      setBooting(false);
+    })();
+  },[]);
+
+  useEffect(()=>{
+    if(booting) return;
+    if(!saveRef.current){saveRef.current=true;return;}
+    sSet("bm_prod_v1",state,true);
+  },[state,booting]);
+
+  const login=async s=>{
+    setSession(s);
+    await sSet("bm_session_prod_v1",s,false);
+    addEvent(`🔐 Connexion : ${s.email}`,"🔐");
+    showToast(`Bienvenue, ${s.email.split("@")[0]} !`,"success");
+  };
+  const logout=async()=>{
+    await sDel("bm_session_prod_v1",false);
+    setSession(null);
+  };
+
+  if(booting) return(
+    <div style={{width:"100%",height:"100dvh",background:G.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <style>{css}</style>
+      <div style={{textAlign:"center"}}>
+        <div style={{width:40,height:40,borderRadius:"50%",border:`3px solid rgba(255,255,255,0.08)`,borderTopColor:ACCENT,animation:"spin 0.9s linear infinite",margin:"0 auto 14px"}}/>
+        <div style={{color:G.muted,fontSize:12}}>Chargement du serveur…</div>
+      </div>
+    </div>
+  );
+
+  if(!session) return(
+    <div style={{fontFamily:"'Inter',-apple-system,BlinkMacSystemFont,sans-serif"}}>
+      <style>{css}</style>
+      <Login onLogin={login} admins={state.admins}/>
+    </div>
+  );
+
+  return(
+    <div style={{width:"100%",height:"100dvh",background:G.bg,display:"flex",flexDirection:"column",fontFamily:"'Inter',-apple-system,BlinkMacSystemFont,sans-serif",overflow:"hidden",color:"white"}}>
+      <style>{css}</style>
+      {toastData&&<Toast {...toastData}/>}
+
+      {/* HEADER */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px 12px",borderBottom:`1px solid ${G.border}`,flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:34,height:34,borderRadius:11,background:`linear-gradient(135deg,${ACCENT},#5533CC)`,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 20px ${ACCENT}44`}}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <div>
+            <div style={{color:"white",fontSize:13.5,fontWeight:900,lineHeight:1}}>BeatMarket Admin</div>
+            <div style={{color:G.dim,fontSize:9.5,marginTop:2}}>{session.role==="super"?"👑 Super Admin":"🛡️ Admin"} · {session.email.split("@")[0]}</div>
+          </div>
+        </div>
+        <button onClick={logout} title="Déconnexion" style={{width:33,height:33,borderRadius:10,background:"rgba(255,59,92,0.1)",border:"1px solid rgba(255,59,92,0.25)",color:"#FF6B85",fontSize:18,cursor:"pointer",transition:"all 0.2s ease"}}>
+          ↪️
+        </button>
+      </div>
+
+      {/* CONTENT */}
+      <div style={{flex:1,overflowY:"auto",padding:"0 16px"}}>
+        <div style={{animation:"fadeUp 0.2s ease"}}>
+          <Dashboard state={state}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+  </script>
+</body>
+</html>
